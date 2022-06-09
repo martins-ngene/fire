@@ -113,6 +113,49 @@ app.jinja_env.filters['datetime'] = format_datetime
 # Controllers.
 #----------------------------------------------------------------------------#
 
+
+# ---------------------------------------------------------------------------#
+#  Functions For Search Implementation
+# ---------------------------------------------------------------------------#
+def search_item(query_table, val):
+  search_term = request.form.get('search_term', '')
+  items = db.session.query(query_table).filter(query_table.name.ilike(f'%{search_term}%')).all()
+  num_items = len(items)
+
+  search_result = {
+    "count": num_items,
+    "data": items,
+  }
+  if val == 1:
+    return search_result
+  elif val == 2:
+    return search_term
+
+# ---------------------------------------------------------------------------#
+# Get cities and states without duplicate
+# ---------------------------------------------------------------------------#
+def city_state_no_duplicate(table1_name, table2_name):
+  places = db.session.query(table1_name.city, table1_name.state).distinct(table1_name.city, table1_name.state).all()
+  city_state = []
+  venue_params = []
+
+  for place in places:
+    result = table1_name.query.filter(table1_name.state == place.state).filter(table1_name.city == place.city).all()
+
+    for params in result:
+      venue_params.append({
+        "id": params.id,
+        "name": params.name,
+        "num_upcoming_shows": len(db.session.query(table2_name).filter(table2_name.start_time > datetime.now()).all())
+      })
+
+      city_state.append({
+        "city": place.city,
+        "state": place.state,
+        "venues": venue_params,
+      })
+  return city_state
+
 @app.route('/')
 def index():
   return render_template('pages/home.html')
@@ -127,28 +170,8 @@ def venues():
   # num_upcoming_shows should be aggregated based on number of upcoming shows per venue.
 
   # To get cities and states and avoid duplicates
-  areas = db.session.query(Venue.city, Venue.state).distinct(Venue.city, Venue.state).all()
-  data = []
 
-  for area in areas:
-    result = Venue.query.filter(Venue.state == area.state).filter(Venue.city == area.city).all()
-
-    venue_params = []
-
-    for params in result:
-      venue_params.append({
-        "id": params.id,
-        "name": params.name,
-        "num_upcoming_shows": len(db.session.query(Show).filter(Show.start_time > datetime.now()).all())
-      })
-
-      data.append({
-        "city": area.city,
-        "state": area.state,
-        "venues": venue_params,
-      })
-
-  return render_template('pages/venues.html', areas=data)
+  return render_template('pages/venues.html', areas=city_state_no_duplicate(Venue, Show))
 
 
 @app.route('/venues/search', methods=['POST'])
@@ -156,15 +179,8 @@ def search_venues():
   # DONE: implement search on artists with partial string search. Ensure it is case-insensitive.
   # seach for Hop should return "The Musical Hop".
   # search for "Music" should return "The Musical Hop" and "Park Square Live Music & Coffee"
-  search_term = request.form.get('search_term', '')
-  result = db.session.query(Venue).filter(Venue.name.ilike(f'%{search_term}%')).all()
-  count = len(result)
 
-  response={
-    "count": count,
-    "data": result,
-  }
-  return render_template('pages/search_venues.html', results=response, search_term=search_term)
+  return render_template('pages/search_venues.html', results=search_item(Venue, 1), search_term=search_item(Venue, 2))
 
 @app.route('/venues/<int:venue_id>')
 def show_venue(venue_id):
@@ -289,15 +305,7 @@ def search_artists():
   # DONE: implement search on artists with partial string search. Ensure it is case-insensitive.
   # seach for "A" should return "Guns N Petals", "Matt Quevado", and "The Wild Sax Band".
   # search for "band" should return "The Wild Sax Band".
-  search_term = request.form.get('search_term', '')
-  result = db.session.query(Artist).filter(Artist.name.ilike(f'%{search_term}%')).all()
-  count = len(result)
-
-  response={
-    "count": count,
-    "data": result,
-  }
-  return render_template('pages/search_artists.html', results=response, search_term=search_term)
+  return render_template('pages/search_artists.html', results=search_item(Artist, 1), search_term=search_item(Artist, 2))
 
 @app.route('/artists/<int:artist_id>')
 def show_artist(artist_id):
@@ -453,21 +461,24 @@ def create_artist_submission():
 def shows():
   # displays list of shows at /shows
   # DONE: replace with real venues data.
-  shows = Show.query.join(Artist, Artist.id == Show.artist_id).join(Venue, Venue.id == Show.venue_id).all()
-  data = []
-  for show in shows:
-    data.append(
-      {
-        "venue_id": show.venue_id,
-        "venue_name": show.venue.name,
-        "artist_id": show.artist_id,
-        "artist_name": show.artist.name,
-        "artist_image_link": show.artist.image_link,
-        "start_time": str(show.start_time),
-      }
-    )
+  list_of_shows = Show.query.join(Venue, Venue.id == Show.venue_id).join(Artist, Artist.id == Show.artist_id).all()
+  def get_list_of_shows(list_param):
+      shows = []
+      for show in list_param:
+        #Push multiple elements into an array
+        shows.append(
+          {
+            "venue_id": show.venue_id,
+            "venue_name": show.venue.name,
+            "artist_id": show.artist_id,
+            "artist_name": show.artist.name,
+            "artist_image_link": show.artist.image_link,
+            "start_time": str(show.start_time),
+          }
+        )
+      return shows
   
-  return render_template('pages/shows.html', shows=data)
+  return render_template('pages/shows.html', shows=get_list_of_shows(list_of_shows))
 
 @app.route('/shows/create')
 def create_shows():
